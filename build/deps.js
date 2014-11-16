@@ -1,7 +1,9 @@
 var deps = {
 	Core: {
 		src: [
-			'Leaflet.draw.js'
+			'Leaflet.draw.js',
+			'../node_modules/leaflet-toolbar/src/ToolbarIcon.js',
+			'ToolbarHandler.js'			
 		],
 		desc: 'The core of the plugin. Currently only includes the version.'
 	},
@@ -46,8 +48,8 @@ var deps = {
 	CommonUI: {
 		src: [
 			'Control.Draw.js',
-			'Toolbar.js',
-			'Tooltip.js'
+			'Tooltip.js',
+			'Toolbar.js'
 		],
 		desc: 'Common UI components used.',
 		deps: ['Extensions']

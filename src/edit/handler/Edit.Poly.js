@@ -4,7 +4,7 @@ L.Edit = L.Edit || {};
  * L.Edit.Poly is an editing handler for polylines and polygons.
  */
 
-L.Edit.Poly = L.Handler.extend({
+L.Edit.Poly = L.ToolbarHandler.extend({
 	options: {
 		icon: new L.DivIcon({
 			iconSize: new L.Point(8, 8),

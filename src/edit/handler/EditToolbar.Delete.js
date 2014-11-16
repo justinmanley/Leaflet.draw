@@ -1,4 +1,4 @@
-L.EditToolbar.Delete = L.Handler.extend({
+L.EditToolbar.Delete = L.ToolbarHandler.extend({
 	statics: {
 		TYPE: 'remove' // not delete as delete is reserved in js
 	},

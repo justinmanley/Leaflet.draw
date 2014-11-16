@@ -1,6 +1,10 @@
-L.EditToolbar.Edit = L.Handler.extend({
+L.EditToolbar.Edit = L.ToolbarHandler.extend({
 	statics: {
 		TYPE: 'edit'
+	},
+
+	options: {
+		selectedPathOptions: true
 	},
 
 	includes: L.Mixin.Events,

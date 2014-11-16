@@ -1,6 +1,6 @@
 L.Draw = {};
 
-L.Draw.Feature = L.Handler.extend({
+L.Draw.Feature = L.ToolbarHandler.extend({
 	includes: L.Mixin.Events,
 
 	initialize: function (map, options) {
