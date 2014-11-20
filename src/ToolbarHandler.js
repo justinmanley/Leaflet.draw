@@ -1,11 +1,14 @@
 L.ToolbarHandler = L.Handler.extend({
 	options: {
 		toolbarIcon: new L.ToolbarIcon(),
-		childActions: []
+		subToolbar: new L.Toolbar()
 	},
 
-	/* Takes the map. */
-	onAdd: function () {
-		
-	}
+	onAdd: function () {},
+
+	omRemove: function() {},
+
+	addHooks: function() {},
+
+	removeHooks: function() {}
 });
