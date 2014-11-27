@@ -105,9 +105,271 @@ L.drawLocal = {
 };
 
 
+/* @flow */
+(function(window, document, undefined) {
+
+"use strict";
+
+L.ToolbarIcon = L.Class.extend({
+
+	statics: {
+		baseClass: 'leaflet-toolbar-icon'
+	},
+
+	options: {
+		html: '',
+		className: '',
+		hideOnClick: false
+	},
+
+	initialize: function(options) {
+		L.setOptions(this, options);
+	},
+
+	onAdd: function(toolbar, action, container, args) {
+		var actionButton, link;
+
+		actionButton = L.DomUtil.create('li', '', container);
+
+		link = L.DomUtil.create('a', '', actionButton);
+		link.innerHTML = this.options.html;
+		link.setAttribute('href', '#');
+		link.setAttribute('title', this.options.tooltip);
+
+		L.DomUtil.addClass(link, this.constructor.baseClass);
+		if (this.options.className) {
+			L.DomUtil.addClass(link, this.options.className);
+		}
+
+		L.DomEvent.on(link, 'click', action.enable, action);
+
+		/* Add secondary toolbar */
+		action._addSubToolbar(toolbar, actionButton, args);
+	}
+});
+
+L.toolbarIcon = function(options) {
+	return new L.ToolbarIcon(options);
+};
+L.Toolbar = L.Class.extend({
+	
+	statics: {
+		baseClass: 'leaflet-toolbar'
+	},
+
+	includes: [L.Mixin.Events],
+
+	options: {
+		className: '',
+		filter: function() { return true; }
+	},
+
+	initialize: function(actions, options) {
+		L.setOptions(this, options);
+
+		/* So that this can be called without an arguments to create an empty toolbar: new L.Toolbar() */
+		this._actions = actions || [];
+	},
+
+	addTo: function(map) {
+		this._arguments = [].slice.call(arguments);
+
+		map.addLayer(this);
+		return this;
+	},
+
+	onAdd: function() {},
+
+	appendToContainer: function(container) {
+		var baseClass = this.constructor.baseClass + '-' + this._calculateDepth(),
+			className = baseClass + ' ' + this.options.className,
+			icon, action,
+			i, l;
+
+		this._container = container;
+		this._ul = L.DomUtil.create('ul', className, container);
+
+		l = this._actions.length;
+
+		for (i = 0; i < l; i++) {
+			action = this._actions[i].apply(undefined, this._arguments);
+			icon = action.options.toolbarIcon;
+			icon.onAdd(this, action, this._ul, this._arguments);
+		}
+	},
+
+	hide: function() {
+		this._ul.style.display = 'none';
+	},
+
+	show: function() {
+		this._ul.style.display = 'block';
+	},
+
+	_calculateDepth: function() {
+		var depth = 0,
+			toolbar = this.parentToolbar;
+
+		while (toolbar) {
+			depth += 1;
+			toolbar = toolbar.parentToolbar;
+		}
+
+		return depth;
+	}
+});
+L.ToolbarHandler = L.Handler.extend({
+	options: {
+		toolbarIcon: new L.ToolbarIcon(),
+		subToolbar: new L.Toolbar()
+	},
+
+	addHooks: function() {
+		var subToolbar = this.options.subToolbar;
+
+		if (subToolbar._actions.length > 0) {
+			subToolbar.show();
+		}
+	},
+
+	removeHooks: function() {
+		var subToolbar = this.options.subToolbar;
+
+		if (subToolbar._actions.length > 0) {
+			subToolbar.hide();
+		}
+	},
+
+	_addSubToolbar: function(toolbar, container, args) {
+		var subToolbar = this.options.subToolbar;
+
+		/* For calculating the nesting depth. */
+		subToolbar.parentToolbar = toolbar;
+
+		if (subToolbar._actions.length > 0) {
+			/* Make a copy of args so as not to pollute the args array used by other actions. */
+			args = [].slice.call(args);
+			args.push(this);
+
+			subToolbar.addTo.apply(subToolbar, args);
+			subToolbar.appendToContainer(container);
+		}
+	}
+});
+L.Toolbar.Control = L.Toolbar.extend({
+
+	statics: {
+		baseClass: 'leaflet-control-toolbar ' + L.Toolbar.baseClass
+	},
+
+	initialize: function(actions, options) {
+		L.Toolbar.prototype.initialize.call(this, actions, options);
+
+		this._control = new L.Control.Toolbar(this.options);
+	},
+
+	onAdd: function(map) {
+		this._control.addTo(map);
+
+		this.appendToContainer(this._control.getContainer());
+	},
+
+	onRemove: function(map) {
+		map.removeLayer(this._control);
+	}
+});
+
+L.Control.Toolbar = L.Control.extend({
+	onAdd: function() {
+		return L.DomUtil.create('div', '');
+	}
+});
+// A convenience class for built-in popup toolbars.
+
+L.Toolbar.Popup = L.Toolbar.extend({
+
+	statics: {
+		baseClass: 'leaflet-popup-toolbar ' + L.Toolbar.baseClass
+	},
+
+	initialize: function(latlng, actions, options) {
+		L.Toolbar.prototype.initialize.call(this, actions, options);
+
+		var	toolbarOptions = L.extend(this.options, {
+				icon: new L.DivIcon({
+					html: '',
+					className: this.options.className
+				})
+			});
+
+		this._marker = new L.Marker(latlng, toolbarOptions);
+	},
+
+	onAdd: function(map) {
+		this._map = map;
+		this._marker.addTo(map);
+
+		this.appendToContainer(this._marker._icon);
+
+		L.DomEvent.on(this._container, 'click', function(event) {
+			L.DomEvent.stopPropagation(event);
+			map.removeLayer(this);
+		}, this);
+
+		this._setStyles();
+	},
+
+	onRemove: function(map) {
+		map.removeLayer(this._marker);
+
+		delete this._map;
+	},
+
+	setLatLng: function(latlng) {
+		this._marker.setLatLng(latlng);
+
+		return this;
+	},
+
+	_setStyles: function() {
+		var container = this._container,
+			toolbar = this._ul,
+			icons = container.querySelectorAll('.leaflet-toolbar-icon'),
+			buttonHeights = [],
+			toolbarWidth = 0,
+			toolbarHeight,
+			tipSize,
+			anchor;
+
+		/* Calculate the dimensions of the toolbar. */
+		for (var i = 0, l = icons.length; i < l; i++) {
+			buttonHeights.push(parseInt(L.DomUtil.getStyle(icons[i], 'height'), 10));
+			toolbarWidth += Math.ceil(parseFloat(L.DomUtil.getStyle(icons[i], 'width')));
+		}
+		toolbar.style.width = toolbarWidth + 'px';
+
+		/* Create and place the toolbar tip. */
+		this._tipContainer = L.DomUtil.create('div', 'leaflet-toolbar-tip-container', container);
+		this._tipContainer.style.width = toolbarWidth + 'px';
+
+		this._tip = L.DomUtil.create('div', 'leaflet-toolbar-tip', this._tipContainer);
+
+		/* Set the anchor point. */
+		toolbarHeight = Math.max.apply(undefined, buttonHeights);
+		tipSize = parseInt(L.DomUtil.getStyle(this._tip, 'width'), 10);
+
+		anchor = new L.Point(toolbarWidth/2, toolbarHeight + 0.7071*tipSize);
+
+		container.style.marginLeft = (-anchor.x) + 'px';
+		container.style.marginTop = (-anchor.y) + 'px';
+	}
+});
+
+})(window, document);
+
 L.Draw = {};
 
-L.Draw.Feature = L.Handler.extend({
+L.Draw.Feature = L.ToolbarHandler.extend({
 	includes: L.Mixin.Events,
 
 	initialize: function (map, options) {
@@ -126,7 +388,7 @@ L.Draw.Feature = L.Handler.extend({
 	enable: function () {
 		if (this._enabled) { return; }
 
-		L.Handler.prototype.enable.call(this);
+		L.ToolbarHandler.prototype.enable.call(this);
 
 		this.fire('enabled', { handler: this.type });
 
@@ -136,7 +398,7 @@ L.Draw.Feature = L.Handler.extend({
 	disable: function () {
 		if (!this._enabled) { return; }
 
-		L.Handler.prototype.disable.call(this);
+		L.ToolbarHandler.prototype.disable.call(this);
 
 		this._map.fire('draw:drawstop', { layerType: this.type });
 
@@ -1051,11 +1313,88 @@ L.Draw.Marker = L.Draw.Feature.extend({
 
 L.Edit = L.Edit || {};
 
+L.Edit.Marker = L.ToolbarHandler.extend({
+	initialize: function (marker, options) {
+		this._marker = marker;
+		L.setOptions(this, options);
+	},
+
+	addHooks: function () {
+		var marker = this._marker;
+
+		marker.dragging.enable();
+		marker.on('dragend', this._onDragEnd, marker);
+		this._toggleMarkerHighlight();
+	},
+
+	removeHooks: function () {
+		var marker = this._marker;
+
+		marker.dragging.disable();
+		marker.off('dragend', this._onDragEnd, marker);
+		this._toggleMarkerHighlight();
+	},
+
+	_onDragEnd: function (e) {
+		var layer = e.target;
+		layer.edited = true;
+	},
+
+	_toggleMarkerHighlight: function () {
+
+		// Don't do anything if this layer is a marker but doesn't have an icon. Markers
+		// should usually have icons. If using Leaflet.draw with Leafler.markercluster there
+		// is a chance that a marker doesn't.
+		if (!this._icon) {
+			return;
+		}
+		
+		// This is quite naughty, but I don't see another way of doing it. (short of setting a new icon)
+		var icon = this._icon;
+
+		icon.style.display = 'none';
+
+		if (L.DomUtil.hasClass(icon, 'leaflet-edit-marker-selected')) {
+			L.DomUtil.removeClass(icon, 'leaflet-edit-marker-selected');
+			// Offset as the border will make the icon move.
+			this._offsetMarker(icon, -4);
+
+		} else {
+			L.DomUtil.addClass(icon, 'leaflet-edit-marker-selected');
+			// Offset as the border will make the icon move.
+			this._offsetMarker(icon, 4);
+		}
+
+		icon.style.display = '';
+	},
+
+	_offsetMarker: function (icon, offset) {
+		var iconMarginTop = parseInt(icon.style.marginTop, 10) - offset,
+			iconMarginLeft = parseInt(icon.style.marginLeft, 10) - offset;
+
+		icon.style.marginTop = iconMarginTop + 'px';
+		icon.style.marginLeft = iconMarginLeft + 'px';
+	}
+});
+
+L.Marker.addInitHook(function () {
+	if (L.Edit.Marker) {
+		this.editing = new L.Edit.Marker(this);
+
+		if (this.options.editable) {
+			this.editing.enable();
+		}
+	}
+});
+
+
+L.Edit = L.Edit || {};
+
 /*
  * L.Edit.Poly is an editing handler for polylines and polygons.
  */
 
-L.Edit.Poly = L.Handler.extend({
+L.Edit.Poly = L.ToolbarHandler.extend({
 	options: {
 		icon: new L.DivIcon({
 			iconSize: new L.Point(8, 8),
@@ -1069,6 +1408,14 @@ L.Edit.Poly = L.Handler.extend({
 	},
 
 	addHooks: function () {
+		var poly = this._poly;
+
+		if (!(poly instanceof L.Polygon)) {
+			poly.options.editing.fill = false;
+		}
+
+		poly.setStyle(poly.options.editing);
+
 		if (this._poly._map) {
 			if (!this._markerGroup) {
 				this._initMarkers();
@@ -1078,8 +1425,12 @@ L.Edit.Poly = L.Handler.extend({
 	},
 
 	removeHooks: function () {
-		if (this._poly._map) {
-			this._poly._map.removeLayer(this._markerGroup);
+		var poly = this._poly;
+
+		poly.setStyle(poly.options.original);
+
+		if (poly._map) {
+			poly._map.removeLayer(this._markerGroup);
 			delete this._markerGroup;
 			delete this._markers;
 		}
@@ -1296,7 +1647,7 @@ L.Edit.Poly = L.Handler.extend({
 
 L.Polyline.addInitHook(function () {
 
-	// Check to see if handler has already been initialized. This is to support versions of Leaflet that still have L.Handler.PolyEdit
+	// Check to see if handler has already been initialized. This is to support versions of Leaflet that still have L.ToolbarHandler.PolyEdit
 	if (this.editing) {
 		return;
 	}
@@ -1325,7 +1676,7 @@ L.Polyline.addInitHook(function () {
 
 L.Edit = L.Edit || {};
 
-L.Edit.SimpleShape = L.Handler.extend({
+L.Edit.SimpleShape = L.ToolbarHandler.extend({
 	options: {
 		moveIcon: new L.DivIcon({
 			iconSize: new L.Point(8, 8),
@@ -1343,8 +1694,12 @@ L.Edit.SimpleShape = L.Handler.extend({
 	},
 
 	addHooks: function () {
-		if (this._shape._map) {
-			this._map = this._shape._map;
+		var shape = this._shape;
+
+		shape.setStyle(shape.options.editing);
+
+		if (shape._map) {
+			this._map = shape._map;
 
 			if (!this._markerGroup) {
 				this._initMarkers();
@@ -1354,7 +1709,11 @@ L.Edit.SimpleShape = L.Handler.extend({
 	},
 
 	removeHooks: function () {
-		if (this._shape._map) {
+		var shape = this._shape;
+
+		shape.setStyle(shape.options.original);
+
+		if (shape._map) {
 			this._unbindMarker(this._moveMarker);
 
 			for (var i = 0, l = this._resizeMarkers.length; i < l; i++) {
@@ -2284,263 +2643,23 @@ L.Tooltip = L.Class.extend({
 	}
 });
 
-L.DrawToolbar = L.Toolbar.extend({
+L.EditToolbar = {};
 
-	statics: {
-		TYPE: 'draw'
-	},
-
-	options: {
-		polyline: {},
-		polygon: {},
-		rectangle: {},
-		circle: {},
-		marker: {}
-	},
-
-	initialize: function (options) {
-		// Ensure that the options are merged correctly since L.extend is only shallow
-		for (var type in this.options) {
-			if (this.options.hasOwnProperty(type)) {
-				if (options[type]) {
-					options[type] = L.extend({}, this.options[type], options[type]);
-				}
-			}
-		}
-
-		this._toolbarClass = 'leaflet-draw-draw';
-		L.Toolbar.prototype.initialize.call(this, options);
-	},
-
-	getModeHandlers: function (map) {
-		return [
-			{
-				enabled: this.options.polyline,
-				handler: new L.Draw.Polyline(map, this.options.polyline),
-				title: L.drawLocal.draw.toolbar.buttons.polyline
-			},
-			{
-				enabled: this.options.polygon,
-				handler: new L.Draw.Polygon(map, this.options.polygon),
-				title: L.drawLocal.draw.toolbar.buttons.polygon
-			},
-			{
-				enabled: this.options.rectangle,
-				handler: new L.Draw.Rectangle(map, this.options.rectangle),
-				title: L.drawLocal.draw.toolbar.buttons.rectangle
-			},
-			{
-				enabled: this.options.circle,
-				handler: new L.Draw.Circle(map, this.options.circle),
-				title: L.drawLocal.draw.toolbar.buttons.circle
-			},
-			{
-				enabled: this.options.marker,
-				handler: new L.Draw.Marker(map, this.options.marker),
-				title: L.drawLocal.draw.toolbar.buttons.marker
-			}
-		];
-	},
-
-	// Get the actions part of the toolbar
-	getActions: function (handler) {
-		return [
-			{
-				enabled: handler.deleteLastVertex,
-				title: L.drawLocal.draw.toolbar.undo.title,
-				text: L.drawLocal.draw.toolbar.undo.text,
-				callback: handler.deleteLastVertex,
-				context: handler
-			},
-			{
-				title: L.drawLocal.draw.toolbar.actions.title,
-				text: L.drawLocal.draw.toolbar.actions.text,
-				callback: this.disable,
-				context: this
-			}
-		];
-	},
-
-	setOptions: function (options) {
-		L.setOptions(this, options);
-
-		for (var type in this._modes) {
-			if (this._modes.hasOwnProperty(type) && options.hasOwnProperty(type)) {
-				this._modes[type].handler.setOptions(options[type]);
-			}
-		}
-	}
-});
-
-
-/*L.Map.mergeOptions({
-	editControl: true
-});*/
-
-L.EditToolbar = L.Toolbar.extend({
+L.EditToolbar.Edit = L.ToolbarHandler.extend({
 	statics: {
 		TYPE: 'edit'
 	},
 
 	options: {
-		edit: {
-			selectedPathOptions: {
-				color: '#fe57a1', /* Hot pink all the things! */
-				opacity: 0.6,
-				dashArray: '10, 10',
-
-				fill: true,
-				fillColor: '#fe57a1',
-				fillOpacity: 0.1,
-
-				// Whether to user the existing layers color
-				maintainColor: false
-			}
-		},
-		remove: {},
-		featureGroup: null /* REQUIRED! TODO: perhaps if not set then all layers on the map are selectable? */
-	},
-
-	initialize: function (options) {
-		// Need to set this manually since null is an acceptable value here
-		if (options.edit) {
-			if (typeof options.edit.selectedPathOptions === 'undefined') {
-				options.edit.selectedPathOptions = this.options.edit.selectedPathOptions;
-			}
-			options.edit.selectedPathOptions = L.extend({}, this.options.edit.selectedPathOptions, options.edit.selectedPathOptions);
-		}
-
-		if (options.remove) {
-			options.remove = L.extend({}, this.options.remove, options.remove);
-		}
-
-		this._toolbarClass = 'leaflet-draw-edit';
-		L.Toolbar.prototype.initialize.call(this, options);
-
-		this._selectedFeatureCount = 0;
-	},
-
-	getModeHandlers: function (map) {
-		var featureGroup = this.options.featureGroup;
-		return [
-			{
-				enabled: this.options.edit,
-				handler: new L.EditToolbar.Edit(map, {
-					featureGroup: featureGroup,
-					selectedPathOptions: this.options.edit.selectedPathOptions
-				}),
-				title: L.drawLocal.edit.toolbar.buttons.edit
-			},
-			{
-				enabled: this.options.remove,
-				handler: new L.EditToolbar.Delete(map, {
-					featureGroup: featureGroup
-				}),
-				title: L.drawLocal.edit.toolbar.buttons.remove
-			}
-		];
-	},
-
-	getActions: function () {
-		return [
-			{
-				title: L.drawLocal.edit.toolbar.actions.save.title,
-				text: L.drawLocal.edit.toolbar.actions.save.text,
-				callback: this._save,
-				context: this
-			},
-			{
-				title: L.drawLocal.edit.toolbar.actions.cancel.title,
-				text: L.drawLocal.edit.toolbar.actions.cancel.text,
-				callback: this.disable,
-				context: this
-			}
-		];
-	},
-
-	addToolbar: function (map) {
-		var container = L.Toolbar.prototype.addToolbar.call(this, map);
-
-		this._checkDisabled();
-
-		this.options.featureGroup.on('layeradd layerremove', this._checkDisabled, this);
-
-		return container;
-	},
-
-	removeToolbar: function () {
-		this.options.featureGroup.off('layeradd layerremove', this._checkDisabled, this);
-
-		L.Toolbar.prototype.removeToolbar.call(this);
-	},
-
-	disable: function () {
-		if (!this.enabled()) { return; }
-
-		this._activeMode.handler.revertLayers();
-
-		L.Toolbar.prototype.disable.call(this);
-	},
-
-	_save: function () {
-		this._activeMode.handler.save();
-		this._activeMode.handler.disable();
-	},
-
-	_checkDisabled: function () {
-		var featureGroup = this.options.featureGroup,
-			hasLayers = featureGroup.getLayers().length !== 0,
-			button;
-
-		if (this.options.edit) {
-			button = this._modes[L.EditToolbar.Edit.TYPE].button;
-
-			if (hasLayers) {
-				L.DomUtil.removeClass(button, 'leaflet-disabled');
-			} else {
-				L.DomUtil.addClass(button, 'leaflet-disabled');
-			}
-
-			button.setAttribute(
-				'title',
-				hasLayers ?
-				L.drawLocal.edit.toolbar.buttons.edit
-				: L.drawLocal.edit.toolbar.buttons.editDisabled
-			);
-		}
-
-		if (this.options.remove) {
-			button = this._modes[L.EditToolbar.Delete.TYPE].button;
-
-			if (hasLayers) {
-				L.DomUtil.removeClass(button, 'leaflet-disabled');
-			} else {
-				L.DomUtil.addClass(button, 'leaflet-disabled');
-			}
-
-			button.setAttribute(
-				'title',
-				hasLayers ?
-				L.drawLocal.edit.toolbar.buttons.remove
-				: L.drawLocal.edit.toolbar.buttons.removeDisabled
-			);
-		}
-	}
-});
-
-
-L.EditToolbar.Edit = L.Handler.extend({
-	statics: {
-		TYPE: 'edit'
+		selectedPathOptions: true
 	},
 
 	includes: L.Mixin.Events,
 
 	initialize: function (map, options) {
-		L.Handler.prototype.initialize.call(this, map);
+		L.ToolbarHandler.prototype.initialize.call(this, map);
 
-		// Set options to the default unless already set
-		this._selectedPathOptions = options.selectedPathOptions;
+		L.setOptions(this, options);
 
 		// Store the selectable layer group for ease of access
 		this._featureGroup = options.featureGroup;
@@ -2565,7 +2684,7 @@ L.EditToolbar.Edit = L.Handler.extend({
 		this._map.fire('draw:editstart', { handler: this.type });
 			//allow drawLayer to be updated before beginning edition.
 
-		L.Handler.prototype.enable.call(this);
+		L.ToolbarHandler.prototype.enable.call(this);
 		this._featureGroup
 			.on('layeradd', this._enableLayerEdit, this)
 			.on('layerremove', this._disableLayerEdit, this);
@@ -2576,7 +2695,7 @@ L.EditToolbar.Edit = L.Handler.extend({
 		this._featureGroup
 			.off('layeradd', this._enableLayerEdit, this)
 			.off('layerremove', this._disableLayerEdit, this);
-		L.Handler.prototype.disable.call(this);
+		L.ToolbarHandler.prototype.disable.call(this);
 		this._map.fire('draw:editstop', { handler: this.type });
 		this.fire('disabled', {handler: this.type});
 	},
@@ -2666,58 +2785,21 @@ L.EditToolbar.Edit = L.Handler.extend({
 			} else if (layer instanceof L.Marker) { // Marker
 				layer.setLatLng(this._uneditedLayerProps[id].latlng);
 			}
+
+			layer.fire('revert-edited', { layer: layer });
 		}
-	},
-
-	_toggleMarkerHighlight: function (marker) {
-		if (!marker._icon) {
-			return;
-		}
-		// This is quite naughty, but I don't see another way of doing it. (short of setting a new icon)
-		var icon = marker._icon;
-
-		icon.style.display = 'none';
-
-		if (L.DomUtil.hasClass(icon, 'leaflet-edit-marker-selected')) {
-			L.DomUtil.removeClass(icon, 'leaflet-edit-marker-selected');
-			// Offset as the border will make the icon move.
-			this._offsetMarker(icon, -4);
-
-		} else {
-			L.DomUtil.addClass(icon, 'leaflet-edit-marker-selected');
-			// Offset as the border will make the icon move.
-			this._offsetMarker(icon, 4);
-		}
-
-		icon.style.display = '';
-	},
-
-	_offsetMarker: function (icon, offset) {
-		var iconMarginTop = parseInt(icon.style.marginTop, 10) - offset,
-			iconMarginLeft = parseInt(icon.style.marginLeft, 10) - offset;
-
-		icon.style.marginTop = iconMarginTop + 'px';
-		icon.style.marginLeft = iconMarginLeft + 'px';
 	},
 
 	_enableLayerEdit: function (e) {
 		var layer = e.layer || e.target || e,
-			isMarker = layer instanceof L.Marker,
 			pathOptions;
-
-		// Don't do anything if this layer is a marker but doesn't have an icon. Markers
-		// should usually have icons. If using Leaflet.draw with Leafler.markercluster there
-		// is a chance that a marker doesn't.
-		if (isMarker && !layer._icon) {
-			return;
-		}
 
 		// Back up this layer (if haven't before)
 		this._backupLayer(layer);
 
-		// Update layer style so appears editable
-		if (this._selectedPathOptions) {
-			pathOptions = L.Util.extend({}, this._selectedPathOptions);
+		// Set different style for editing mode
+		if (this.options.selectedPathOptions) {
+			pathOptions = L.Util.extend({}, this.options.selectedPathOptions);
 
 			// Use the existing color of the layer
 			if (pathOptions.maintainColor) {
@@ -2725,55 +2807,21 @@ L.EditToolbar.Edit = L.Handler.extend({
 				pathOptions.fillColor = layer.options.fillColor;
 			}
 
-			if (isMarker) {
-				this._toggleMarkerHighlight(layer);
-			} else {
-				layer.options.previousOptions = L.Util.extend({ dashArray: null }, layer.options);
-
-				// Make sure that Polylines are not filled
-				if (!(layer instanceof L.Circle) && !(layer instanceof L.Polygon) && !(layer instanceof L.Rectangle)) {
-					pathOptions.fill = false;
-				}
-
-				layer.setStyle(pathOptions);
-			}
+			layer.options.original = L.extend({}, layer.options);
+			layer.options.editing = pathOptions;
 		}
 
-		if (isMarker) {
-			layer.dragging.enable();
-			layer.on('dragend', this._onMarkerDragEnd);
-		} else {
-			layer.editing.enable();
-		}
+		layer.editing.enable();
 	},
 
 	_disableLayerEdit: function (e) {
 		var layer = e.layer || e.target || e;
+
 		layer.edited = false;
+		layer.editing.disable();
 
-		// Reset layer styles to that of before select
-		if (this._selectedPathOptions) {
-			if (layer instanceof L.Marker) {
-				this._toggleMarkerHighlight(layer);
-			} else {
-				// reset the layer style to what is was before being selected
-				layer.setStyle(layer.options.previousOptions);
-				// remove the cached options for the layer object
-				delete layer.options.previousOptions;
-			}
-		}
-
-		if (layer instanceof L.Marker) {
-			layer.dragging.disable();
-			layer.off('dragend', this._onMarkerDragEnd, this);
-		} else {
-			layer.editing.disable();
-		}
-	},
-
-	_onMarkerDragEnd: function (e) {
-		var layer = e.target;
-		layer.edited = true;
+		delete layer.options.editing;
+		delete layer.options.original;
 	},
 
 	_onMouseMove: function (e) {
@@ -2786,7 +2834,7 @@ L.EditToolbar.Edit = L.Handler.extend({
 });
 
 
-L.EditToolbar.Delete = L.Handler.extend({
+L.EditToolbar.Delete = L.ToolbarHandler.extend({
 	statics: {
 		TYPE: 'remove' // not delete as delete is reserved in js
 	},
@@ -2794,7 +2842,7 @@ L.EditToolbar.Delete = L.Handler.extend({
 	includes: L.Mixin.Events,
 
 	initialize: function (map, options) {
-		L.Handler.prototype.initialize.call(this, map);
+		L.ToolbarHandler.prototype.initialize.call(this, map);
 
 		L.Util.setOptions(this, options);
 
@@ -2817,7 +2865,7 @@ L.EditToolbar.Delete = L.Handler.extend({
 
 		this._map.fire('draw:deletestart', { handler: this.type });
 
-		L.Handler.prototype.enable.call(this);
+		L.ToolbarHandler.prototype.enable.call(this);
 
 		this._deletableLayers
 			.on('layeradd', this._enableLayerDelete, this)
@@ -2831,7 +2879,7 @@ L.EditToolbar.Delete = L.Handler.extend({
 			.off('layeradd', this._enableLayerDelete, this)
 			.off('layerremove', this._disableLayerDelete, this);
 
-		L.Handler.prototype.disable.call(this);
+		L.ToolbarHandler.prototype.disable.call(this);
 
 		this._map.fire('draw:deletestop', { handler: this.type });
 
@@ -2870,6 +2918,7 @@ L.EditToolbar.Delete = L.Handler.extend({
 		// Iterate of the deleted layers and add them back into the featureGroup
 		this._deletedLayers.eachLayer(function (layer) {
 			this._deletableLayers.addLayer(layer);
+			layer.fire('revert-deleted', { layer: layer });
 		}, this);
 	},
 
@@ -2898,6 +2947,8 @@ L.EditToolbar.Delete = L.Handler.extend({
 		this._deletableLayers.removeLayer(layer);
 
 		this._deletedLayers.addLayer(layer);
+
+		layer.fire('deleted');
 	},
 
 	_onMouseMove: function (e) {
