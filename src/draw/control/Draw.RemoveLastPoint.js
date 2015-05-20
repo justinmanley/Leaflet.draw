@@ -1,6 +1,6 @@
 L.Draw.RemoveLastPoint = L.ToolbarAction.extend({
 	options: {
-		toolbarIcon: { html: 'Delete last point' }
+		toolbarIcon: { html: L.drawLocal.draw.toolbar.undo.text }
 	},
 
 	initialize: function (map, drawing) {

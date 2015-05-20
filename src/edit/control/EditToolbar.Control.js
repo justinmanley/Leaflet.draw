@@ -24,7 +24,7 @@ L.EditToolbar.Control = L.Toolbar.Control.extend({
 
 L.EditToolbar.Save = L.ToolbarAction.extend({
 	options: {
-		toolbarIcon: { html: 'Save' }
+		toolbarIcon: { html: L.drawLocal.edit.toolbar.actions.save.text }
 	},
 	initialize: function (map, featureGroup, editing) {
 		this.editing = editing;
@@ -38,7 +38,7 @@ L.EditToolbar.Save = L.ToolbarAction.extend({
 
 L.EditToolbar.Undo = L.ToolbarAction.extend({
 	options: {
-		toolbarIcon: { html: 'Undo' }
+		toolbarIcon: { html: L.drawLocal.edit.toolbar.actions.cancel.text }
 	},
 	initialize: function (map, featureGroup, editing) {
 		this.editing = editing;
